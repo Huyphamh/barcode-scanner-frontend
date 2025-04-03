@@ -1,90 +1,83 @@
 import React, { useEffect, useRef, useState } from "react";
-import Quagga from "quagga";
-import { Button, Card, CardContent, Typography } from "@mui/material";
+import { BrowserMultiFormatReader } from "@zxing/library";
+import {
+  Button,
+  Card,
+  CardContent,
+  Typography,
+  Select,
+  MenuItem,
+} from "@mui/material";
 
 const CameraCapture = ({ setBarcodes }) => {
-  const scannerRef = useRef(null);
+  const videoRef = useRef(null);
   const [scanning, setScanning] = useState(false);
   const [detectedBarcodes, setDetectedBarcodes] = useState([]);
+  const [selectedCamera, setSelectedCamera] = useState("environment"); // Mặc định dùng camera sau
+  const codeReader = new BrowserMultiFormatReader();
 
   useEffect(() => {
     return () => {
       if (scanning) {
-        Quagga.stop();
+        stopScanner();
       }
     };
-  }, [scanning]);
+  }, []); //
 
-  const startScanner = () => {
-    if (scanning) return; // Nếu đang chạy thì không cần chạy lại
-
-    if (!scannerRef.current) {
-      console.error("⚠️ scannerRef chưa được gán vào DOM!");
-      return;
-    }
+  const startScanner = async () => {
+    if (scanning) return;
 
     setScanning(true);
-    Quagga.init(
-      {
-        inputStream: {
-          type: "LiveStream",
-          constraints: { facingMode: "environment" }, // Dùng camera sau
-          target: scannerRef.current, // Kiểm tra scannerRef trước khi truyền vào
-        },
-        locator: {
-          patchSize: "medium",
-          halfSample: true,
-        },
-        numOfWorkers: navigator.hardwareConcurrency || 2,
-        decoder: {
-          readers: ["ean_reader", "code_128_reader", "upc_reader"], // Các loại mã vạch cần quét
-          multiple: true, // Cho phép quét nhiều mã cùng lúc
-        },
-        locate: true,
-      },
-      (err) => {
-        if (err) {
-          console.error("🚨 Lỗi QuaggaJS:", err);
-          setScanning(false);
-          return;
-        }
-        Quagga.start();
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: selectedCamera }, // Chọn camera
+      });
+
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.setAttribute("playsinline", ""); // iOS bắt buộc cần
+        videoRef.current.play();
       }
-    );
 
-    Quagga.onDetected((result) => {
-      if (!result || !result.codeResult || !result.codeResult.code) return;
+      codeReader.decodeFromVideoDevice(
+        undefined,
+        videoRef.current,
+        (result, err) => {
+          if (result) {
+            const code = result.getText();
+            if (!detectedBarcodes.includes(code)) {
+              setDetectedBarcodes((prev) => [...prev, code]);
+              setBarcodes((prev) => [...prev, code]);
 
-      const codes = result.codeResult.code;
-      if (!detectedBarcodes.includes(codes)) {
-        setDetectedBarcodes((prev) => [...prev, codes]); // Lưu danh sách mã vạch
-        setBarcodes((prev) => [...prev, codes]);
-
-        // 📌 Hiệu ứng rung khi nhận diện mã vạch thành công
-        if (navigator.vibrate) {
-          navigator.vibrate(200);
+              // 📌 Hiệu ứng rung khi quét thành công
+              if (navigator.vibrate) {
+                navigator.vibrate(200);
+              }
+            }
+          }
         }
-      }
-    });
+      );
+    } catch (error) {
+      console.error("🚨 Lỗi khi mở camera:", error);
+      setScanning(false);
+    }
   };
 
   const stopScanner = () => {
-    if (Quagga) {
-      Quagga.stop();
-      setScanning(false);
-    } else {
-      console.warn("⚠️ Quagga chưa được khởi tạo!");
+    if (videoRef.current && videoRef.current.srcObject) {
+      videoRef.current.srcObject.getTracks().forEach((track) => track.stop());
     }
+    codeReader.reset(); // Dừng nhận diện
+    setScanning(false);
   };
 
   return (
     <Card className="shadow-lg">
       <CardContent className="text-center">
-        <Typography variant="h5">📸 Quét mã vạch tự động</Typography>
+        <Typography variant="h5">📸 Quét mã vạch bằng camera</Typography>
 
         {/* Khu vực hiển thị camera */}
         <div
-          ref={scannerRef}
           style={{
             width: "100%",
             height: "300px",
@@ -94,22 +87,18 @@ const CameraCapture = ({ setBarcodes }) => {
             position: "relative",
           }}
         >
-          {!scanning && (
-            <Typography
-              variant="body1"
-              color="textSecondary"
-              style={{
-                position: "absolute",
-                top: "50%",
-                left: "50%",
-                transform: "translate(-50%, -50%)",
-                textAlign: "center",
-              }}
-            >
-              📷 Bật camera để quét mã vạch
-            </Typography>
-          )}
+          <video ref={videoRef} style={{ width: "100%", height: "100%" }} />
         </div>
+
+        {/* Chọn Camera */}
+        <Select
+          value={selectedCamera}
+          onChange={(e) => setSelectedCamera(e.target.value)}
+          style={{ marginTop: "10px" }}
+        >
+          <MenuItem value="environment">📷 Camera Sau</MenuItem>
+          <MenuItem value="user">🤳 Camera Trước</MenuItem>
+        </Select>
 
         {scanning ? (
           <Typography variant="body1" color="primary" className="mt-2">
@@ -121,6 +110,7 @@ const CameraCapture = ({ setBarcodes }) => {
           </Typography>
         )}
 
+        {/* Nút điều khiển */}
         <Button
           variant="contained"
           color="primary"
@@ -138,6 +128,7 @@ const CameraCapture = ({ setBarcodes }) => {
           ⏹️ Dừng quét
         </Button>
 
+        {/* Hiển thị kết quả quét */}
         {detectedBarcodes.length > 0 && (
           <Typography variant="body2" color="success" className="mt-3">
             ✅ Mã vạch đã quét: {detectedBarcodes.join(", ")}
