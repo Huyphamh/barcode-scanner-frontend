@@ -12,8 +12,8 @@ import {
 const CameraCapture = ({ setBarcodes }) => {
   const videoRef = useRef(null);
   const [scanning, setScanning] = useState(false);
-  const [detectedBarcodes, setDetectedBarcodes] = useState([]);
-  const [selectedCamera, setSelectedCamera] = useState("environment"); // Mặc định dùng camera sau
+  const [detectedBarcodes, setDetectedBarcodes] = useState(new Set()); // Dùng Set để tránh trùng
+  const [selectedCamera, setSelectedCamera] = useState("environment");
   const codeReader = new BrowserMultiFormatReader();
 
   useEffect(() => {
@@ -22,7 +22,7 @@ const CameraCapture = ({ setBarcodes }) => {
         stopScanner();
       }
     };
-  }, []); //
+  }, []);
 
   const startScanner = async () => {
     if (scanning) return;
@@ -30,12 +30,12 @@ const CameraCapture = ({ setBarcodes }) => {
     setScanning(true);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: selectedCamera }, // Chọn camera
+        video: { facingMode: selectedCamera },
       });
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.setAttribute("playsinline", ""); // iOS bắt buộc cần
+        videoRef.current.setAttribute("playsinline", "");
         videoRef.current.play();
       }
 
@@ -45,8 +45,8 @@ const CameraCapture = ({ setBarcodes }) => {
         (result, err) => {
           if (result) {
             const code = result.getText();
-            if (!detectedBarcodes.includes(code)) {
-              setDetectedBarcodes((prev) => [...prev, code]);
+            if (!detectedBarcodes.has(code)) {
+              setDetectedBarcodes((prev) => new Set([...prev, code])); // Thêm vào Set
               setBarcodes((prev) => [...prev, code]);
 
               // 📌 Hiệu ứng rung khi quét thành công
@@ -67,7 +67,7 @@ const CameraCapture = ({ setBarcodes }) => {
     if (videoRef.current && videoRef.current.srcObject) {
       videoRef.current.srcObject.getTracks().forEach((track) => track.stop());
     }
-    codeReader.reset(); // Dừng nhận diện
+    codeReader.reset();
     setScanning(false);
   };
 
@@ -129,11 +129,11 @@ const CameraCapture = ({ setBarcodes }) => {
         </Button>
 
         {/* Hiển thị kết quả quét */}
-        {detectedBarcodes.length > 0 && (
+        {/* {detectedBarcodes.size > 0 && (
           <Typography variant="body2" color="success" className="mt-3">
-            ✅ Mã vạch đã quét: {detectedBarcodes.join(", ")}
+            ✅ Mã vạch đã quét: {[...detectedBarcodes].join(", ")}
           </Typography>
-        )}
+        )} */}
       </CardContent>
     </Card>
   );
