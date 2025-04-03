@@ -62,13 +62,15 @@ const BarcodeList = ({ barcodes, setBarcodes }) => {
   //     (prev) => new Set([...prev].filter((b) => b !== barcodeToRemove))
   //   );
   // };
-  const removeBarcode = (index) => {
-    setBarcodes((prev) => [...new Set(prev.filter((_, i) => i !== index))]);
+  const removeBarcode = (barcodeToRemove) => {
+    setBarcodes(
+      (prev) => new Set([...prev].filter((b) => b !== barcodeToRemove))
+    );
   };
 
   const clearList = () => {
     if (window.confirm("❌ Bạn có chắc chắn muốn xóa danh sách?")) {
-      setBarcodes(new Set());
+      setBarcodes(new Set()); // Reset lại danh sách
     }
   };
 
@@ -76,7 +78,7 @@ const BarcodeList = ({ barcodes, setBarcodes }) => {
     <Card className="shadow-lg">
       <CardContent>
         <Typography variant="h5" className="mb-3">
-          📋 Danh sách mã vạch ({barcodes.size})
+          📋 Danh sách mã vạch ({[...barcodes].length})
         </Typography>
 
         {/* Nhập link Google Sheets */}

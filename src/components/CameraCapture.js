@@ -12,7 +12,7 @@ import {
 const CameraCapture = ({ setBarcodes }) => {
   const videoRef = useRef(null);
   const [scanning, setScanning] = useState(false);
-  const [detectedBarcodes, setDetectedBarcodes] = useState(new Set()); // Dùng Set để tránh trùng
+  //const [detectedBarcodes, setDetectedBarcodes] = useState(new Set()); // Dùng Set để tránh trùng
   const [selectedCamera, setSelectedCamera] = useState("environment");
   const codeReader = new BrowserMultiFormatReader();
 
@@ -101,7 +101,7 @@ const CameraCapture = ({ setBarcodes }) => {
           style={{ marginTop: "10px" }}
         >
           <MenuItem value="environment">📷 Camera Sau</MenuItem>
-          <MenuItem value="user">🤳 Camera Trước</MenuItem>
+          {/* <MenuItem value="user">🤳 Camera Trước</MenuItem> */}
         </Select>
 
         {scanning ? (
