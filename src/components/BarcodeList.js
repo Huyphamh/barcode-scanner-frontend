@@ -57,10 +57,13 @@ const BarcodeList = ({ barcodes, setBarcodes }) => {
     }
   };
 
-  const removeBarcode = (barcodeToRemove) => {
-    setBarcodes(
-      (prev) => new Set([...prev].filter((b) => b !== barcodeToRemove))
-    );
+  // const removeBarcode = (barcodeToRemove) => {
+  //   setBarcodes(
+  //     (prev) => new Set([...prev].filter((b) => b !== barcodeToRemove))
+  //   );
+  // };
+  const removeBarcode = (index) => {
+    setBarcodes((prev) => [...new Set(prev.filter((_, i) => i !== index))]);
   };
 
   const clearList = () => {

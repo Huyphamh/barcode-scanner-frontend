@@ -35,7 +35,7 @@ const CameraCapture = ({ setBarcodes }) => {
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.setAttribute("playsinline", "");
+        videoRef.current.setAttribute("playsinline", ""); // iOS cần
         videoRef.current.play();
       }
 
@@ -45,14 +45,18 @@ const CameraCapture = ({ setBarcodes }) => {
         (result, err) => {
           if (result) {
             const code = result.getText();
-            if (!detectedBarcodes.has(code)) {
-              setDetectedBarcodes((prev) => new Set([...prev, code])); // Thêm vào Set
-              setBarcodes((prev) => [...prev, code]);
 
-              // 📌 Hiệu ứng rung khi quét thành công
-              if (navigator.vibrate) {
-                navigator.vibrate(200);
+            // ⚠️ Chỉ thêm nếu chưa có trong danh sách
+            setBarcodes((prev) => {
+              if (!prev.includes(code)) {
+                return [...prev, code]; // Thêm mã mới
               }
+              return prev; // Không thay đổi nếu trùng
+            });
+
+            // 📌 Hiệu ứng rung nếu quét thành công
+            if (navigator.vibrate) {
+              navigator.vibrate(200);
             }
           }
         }
