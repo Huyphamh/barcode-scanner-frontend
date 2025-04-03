@@ -13,42 +13,36 @@ import {
   IconButton,
 } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
-
 import SaveAltIcon from "@mui/icons-material/Save";
 import DeleteIcon from "@mui/icons-material/Delete";
 import CloudUploadIcon from "@mui/icons-material/CloudUpload";
 
 const BarcodeList = ({ barcodes, setBarcodes }) => {
-  const [sheetUrl, setSheetUrl] = useState(""); // Thêm state lưu link Google Sheets
+  const [sheetUrl, setSheetUrl] = useState("");
 
   const exportToExcel = async () => {
     const response = await axios.post(
       "https://barcode-scanner-backend-production.up.railway.app/export-excel",
-      {
-        data: barcodes,
-      }
+      { data: [...barcodes] } // Convert Set to array
     );
     alert(`✅ File Excel đã xuất: ${response.data.file}`);
   };
 
   const uploadToGoogleSheets = async () => {
-    console.log("📤 Gửi dữ liệu:", { sheetUrl, barcodes }); // 📌 Log kiểm tra
     if (!sheetUrl) {
       alert("⚠️ Vui lòng nhập link Google Sheets trước!");
       return;
     }
 
-    if (!Array.isArray(barcodes) || barcodes.length === 0) {
+    if (barcodes.size === 0) {
       alert("⚠️ Danh sách mã vạch rỗng!");
       return;
     }
 
-    console.log("📤 Gửi dữ liệu:", { sheetUrl, barcodes });
-
     try {
       const response = await axios.post(
         "https://barcode-scanner-backend-production.up.railway.app/upload-google-sheet",
-        { barcodes, sheetUrl }, // Gửi cả link Google Sheets
+        { barcodes: [...barcodes], sheetUrl },
         { headers: { "Content-Type": "application/json" } }
       );
 
@@ -63,12 +57,15 @@ const BarcodeList = ({ barcodes, setBarcodes }) => {
     }
   };
 
-  const removeBarcode = (index) => {
-    setBarcodes((prev) => prev.filter((_, i) => i !== index));
+  const removeBarcode = (barcodeToRemove) => {
+    setBarcodes(
+      (prev) => new Set([...prev].filter((b) => b !== barcodeToRemove))
+    );
   };
+
   const clearList = () => {
     if (window.confirm("❌ Bạn có chắc chắn muốn xóa danh sách?")) {
-      setBarcodes([]);
+      setBarcodes(new Set());
     }
   };
 
@@ -76,7 +73,7 @@ const BarcodeList = ({ barcodes, setBarcodes }) => {
     <Card className="shadow-lg">
       <CardContent>
         <Typography variant="h5" className="mb-3">
-          📋 Danh sách mã vạch ({barcodes.length})
+          📋 Danh sách mã vạch ({barcodes.size})
         </Typography>
 
         {/* Nhập link Google Sheets */}
@@ -91,15 +88,15 @@ const BarcodeList = ({ barcodes, setBarcodes }) => {
         />
 
         <List>
-          {barcodes.length > 0 ? (
-            barcodes.map((barcode, index) => (
+          {[...barcodes].length > 0 ? (
+            [...barcodes].map((barcode, index) => (
               <React.Fragment key={index}>
                 <ListItem
                   secondaryAction={
                     <IconButton
                       edge="end"
                       color="error"
-                      onClick={() => removeBarcode(index)}
+                      onClick={() => removeBarcode(barcode)}
                     >
                       <CloseIcon />
                     </IconButton>
@@ -137,7 +134,7 @@ const BarcodeList = ({ barcodes, setBarcodes }) => {
         <Button
           variant="contained"
           startIcon={<CloudUploadIcon />}
-          onClick={() => uploadToGoogleSheets(barcodes)}
+          onClick={uploadToGoogleSheets}
           className="m-5 mt-3 ml-2"
         >
           📤 Nhập Google Sheets
