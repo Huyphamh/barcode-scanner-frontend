@@ -48,12 +48,12 @@ const CameraCapture = ({ setBarcodes }) => {
             const code = result.getText();
 
             setBarcodes((prev) => {
-              if (!prev.includes(code)) {
+              if (!prev.has(code)) {
                 toast.success(`✅ Đã quét: ${code}`, {
                   position: "top-right",
                   autoClose: 2000,
                 });
-                return [...prev, code];
+                return new Set([...prev, code]);
               }
               return prev;
             });

@@ -7,7 +7,7 @@ import { ToastContainer } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 
 function App() {
-  const [barcodes, setBarcodes] = useState([]);
+  const [barcodes, setBarcodes] = useState(new Set());
 
   return (
     <Container className="p-5 text-center">
