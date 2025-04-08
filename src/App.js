@@ -3,6 +3,8 @@ import BarcodeScanner from "./components/BarcodeScanner";
 import BarcodeList from "./components/BarcodeList";
 import CameraCapture from "./components/CameraCapture";
 import { Container, Typography, Box } from "@mui/material";
+import { ToastContainer } from "react-toastify";
+import "react-toastify/dist/ReactToastify.css";
 
 function App() {
   const [barcodes, setBarcodes] = useState([]);
@@ -16,6 +18,7 @@ function App() {
         <BarcodeScanner setBarcodes={setBarcodes} />
         <CameraCapture setBarcodes={setBarcodes} />
         <BarcodeList barcodes={barcodes} setBarcodes={setBarcodes} />
+        <ToastContainer />
       </Box>
     </Container>
   );

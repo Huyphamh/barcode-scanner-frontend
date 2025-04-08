@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { BrowserMultiFormatReader } from "@zxing/library";
+import { toast } from "react-toastify";
 import {
   Button,
   Card,
@@ -46,15 +47,17 @@ const CameraCapture = ({ setBarcodes }) => {
           if (result) {
             const code = result.getText();
 
-            // ⚠️ Chỉ thêm nếu chưa có trong danh sách
             setBarcodes((prev) => {
               if (!prev.includes(code)) {
-                return [...prev, code]; // Thêm mã mới
+                toast.success(`✅ Đã quét: ${code}`, {
+                  position: "top-right",
+                  autoClose: 2000,
+                });
+                return [...prev, code];
               }
-              return prev; // Không thay đổi nếu trùng
+              return prev;
             });
 
-            // 📌 Hiệu ứng rung nếu quét thành công
             if (navigator.vibrate) {
               navigator.vibrate(200);
             }

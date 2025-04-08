@@ -32,7 +32,7 @@ const BarcodeScanner = ({ setBarcodes }) => {
       console.error("❌ Lỗi khi quét mã vạch:", error);
       //alert("❌ Lỗi khi quét mã vạch! Ảnh có thể mờ hoặc quá xa");
       alert(
-        "❌ Ông cố ơi ông cố! Ảnh mờ hoặc quá xa sao tuôi đọc mã được. Vui lòng nâng cấp điện thoại đi Ní !!!"
+        "❌ Lỗi khi quét mã vạch! Ảnh có thể mờ hoặc quá xa. Vui lòng nâng cấp điện thoại đi Ní !!!"
       );
     }
   };
