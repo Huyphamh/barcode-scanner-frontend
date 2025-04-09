@@ -3,12 +3,26 @@
 @tailwind utilities;
 
 body {
-  margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
     'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  margin: 0;
+  padding: 0;
+  background: linear-gradient(
+    to bottom,
+    #80EE98,
+    #46DFB1,
+    #09D1C7,
+    #15919B,
+    #0C6478,
+    #213A58
+  );
+  min-height: 100vh;
+  background-attachment: fixed; /* Giữ cố định nền khi cuộn */
+  background-repeat: no-repeat;
+  background-size: cover;
 }
 
 code {
