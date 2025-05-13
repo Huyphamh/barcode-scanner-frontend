@@ -20,12 +20,44 @@ import CloudUploadIcon from "@mui/icons-material/CloudUpload";
 const BarcodeList = ({ barcodes, setBarcodes }) => {
   const [sheetUrl, setSheetUrl] = useState("");
 
+  // const exportToExcel = async () => {
+  //   const response = await axios.post(
+  //     "https://barcode-scanner-backend-production.up.railway.app/export-excel",
+  //     { data: [...barcodes] } // Convert Set to array
+  //   );
+  //   alert(`✅ File Excel đã xuất: ${response.data.file}`);
+  // };
   const exportToExcel = async () => {
-    const response = await axios.post(
-      "https://barcode-scanner-backend-production.up.railway.app/export-excel",
-      { data: [...barcodes] } // Convert Set to array
-    );
-    alert(`✅ File Excel đã xuất: ${response.data.file}`);
+    try {
+      const response = await fetch(
+        "https://barcode-scanner-backend-production.up.railway.app/export-excel",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ data: [...barcodes] }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error("Lỗi khi xuất file Excel");
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `barcode_data_${Date.now()}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("❌ Lỗi khi tải file:", error);
+      alert("❌ Có lỗi xảy ra khi tải file Excel.");
+    }
   };
 
   const uploadToGoogleSheets = async () => {
