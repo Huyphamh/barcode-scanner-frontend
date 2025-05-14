@@ -17,7 +17,7 @@ const CameraCapture = ({ setBarcodes }) => {
   const [selectedCamera, setSelectedCamera] = useState("environment");
   const codeReader = useRef(new BrowserMultiFormatReader()).current;
   const clearCanvasTimeout = useRef(null);
-  const lastScannedCode = useRef("");
+  const lastScannedCodes = useRef(new Set()); // Thay vì lưu chỉ một mã vạch đã quét
 
   useEffect(() => {
     return () => {
@@ -48,8 +48,9 @@ const CameraCapture = ({ setBarcodes }) => {
             const code = result.getText();
 
             // Tránh quét lại liên tục cùng một mã
-            if (code === lastScannedCode.current) return;
-            lastScannedCode.current = code;
+            if (lastScannedCodes.current.has(code)) return;
+
+            lastScannedCodes.current.add(code);
 
             const points = result.getResultPoints();
             drawFocus(points);
@@ -88,6 +89,7 @@ const CameraCapture = ({ setBarcodes }) => {
     const scaleX = canvas.width / videoRef.current.videoWidth;
     const scaleY = canvas.height / videoRef.current.videoHeight;
 
+    // Lấy tất cả các điểm của các mã vạch đã quét
     const xPoints = points.map((p) => p.getX() * scaleX);
     const yPoints = points.map((p) => p.getY() * scaleY);
 
@@ -96,17 +98,17 @@ const CameraCapture = ({ setBarcodes }) => {
     const width = Math.max(...xPoints) - x || 80;
     const height = Math.max(...yPoints) - y || 80;
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(0, 0, canvas.width, canvas.height); // Xóa canvas trước khi vẽ
     ctx.strokeStyle = "lime";
     ctx.lineWidth = 4;
-    ctx.strokeRect(x, y, width, height);
+    ctx.strokeRect(x, y, width, height); // Vẽ khung bao quanh mã vạch
 
     canvas.style.opacity = "1";
 
     if (clearCanvasTimeout.current) clearTimeout(clearCanvasTimeout.current);
     clearCanvasTimeout.current = setTimeout(() => {
       canvas.style.opacity = "0";
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.clearRect(0, 0, canvas.width, canvas.height); // Xóa canvas sau khi tạm ẩn
     }, 500);
   };
 
@@ -116,7 +118,7 @@ const CameraCapture = ({ setBarcodes }) => {
     }
     codeReader.reset();
     setScanning(false);
-    lastScannedCode.current = "";
+    lastScannedCodes.current.clear(); // Xóa bộ nhớ lưu mã vạch đã quét
 
     if (canvasRef.current) {
       const ctx = canvasRef.current.getContext("2d");
