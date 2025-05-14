@@ -12,23 +12,22 @@ import {
 
 const CameraCapture = ({ setBarcodes }) => {
   const videoRef = useRef(null);
+  const canvasRef = useRef(null);
   const [scanning, setScanning] = useState(false);
-  //const [detectedBarcodes, setDetectedBarcodes] = useState(new Set()); // Dùng Set để tránh trùng
   const [selectedCamera, setSelectedCamera] = useState("environment");
   const codeReader = new BrowserMultiFormatReader();
+  let clearCanvasTimeout = null;
 
   useEffect(() => {
     return () => {
-      if (scanning) {
-        stopScanner();
-      }
+      stopScanner();
     };
   }, []);
 
   const startScanner = async () => {
     if (scanning) return;
-
     setScanning(true);
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: selectedCamera },
@@ -46,6 +45,43 @@ const CameraCapture = ({ setBarcodes }) => {
         (result, err) => {
           if (result) {
             const code = result.getText();
+            const points = result.getResultPoints();
+
+            // Vẽ khung focus nếu có tọa độ
+            if (canvasRef.current && points.length >= 2) {
+              const canvas = canvasRef.current;
+              const ctx = canvas.getContext("2d");
+              const rect = videoRef.current.getBoundingClientRect();
+
+              canvas.width = rect.width;
+              canvas.height = rect.height;
+
+              const scaleX = canvas.width / videoRef.current.videoWidth;
+              const scaleY = canvas.height / videoRef.current.videoHeight;
+
+              const [p1, p2] = points;
+
+              const x = p1.getX() * scaleX;
+              const y = p1.getY() * scaleY;
+              const width = (p2.getX() - p1.getX()) * scaleX || 80;
+              const height = (p2.getY() - p1.getY()) * scaleY || 80;
+
+              // Xóa canvas và vẽ mới
+              ctx.clearRect(0, 0, canvas.width, canvas.height);
+              ctx.strokeStyle = "lime";
+              ctx.lineWidth = 4;
+              ctx.strokeRect(x, y, width, height);
+
+              // Hiện canvas (fade in)
+              canvas.style.opacity = "1";
+
+              // Xóa sau 500ms (fade out)
+              if (clearCanvasTimeout) clearTimeout(clearCanvasTimeout);
+              clearCanvasTimeout = setTimeout(() => {
+                canvas.style.opacity = "0";
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+              }, 500);
+            }
 
             setBarcodes((prev) => {
               if (!prev.has(code)) {
@@ -76,6 +112,13 @@ const CameraCapture = ({ setBarcodes }) => {
     }
     codeReader.reset();
     setScanning(false);
+
+    if (canvasRef.current) {
+      const ctx = canvasRef.current.getContext("2d");
+      ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+      canvasRef.current.style.opacity = "0";
+    }
+    if (clearCanvasTimeout) clearTimeout(clearCanvasTimeout);
   };
 
   return (
@@ -83,7 +126,7 @@ const CameraCapture = ({ setBarcodes }) => {
       <CardContent className="text-center">
         <Typography variant="h5">📸 Quét mã vạch bằng camera</Typography>
 
-        {/* Khu vực hiển thị camera */}
+        {/* Vùng hiển thị camera + canvas */}
         <div
           style={{
             width: "100%",
@@ -95,6 +138,19 @@ const CameraCapture = ({ setBarcodes }) => {
           }}
         >
           <video ref={videoRef} style={{ width: "100%", height: "100%" }} />
+          <canvas
+            ref={canvasRef}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              width: "100%",
+              height: "100%",
+              pointerEvents: "none",
+              transition: "opacity 0.3s ease-in-out",
+              opacity: 0,
+            }}
+          />
         </div>
 
         {/* Chọn Camera */}
@@ -134,13 +190,6 @@ const CameraCapture = ({ setBarcodes }) => {
         >
           ⏹️ Dừng quét
         </Button>
-
-        {/* Hiển thị kết quả quét */}
-        {/* {detectedBarcodes.size > 0 && (
-          <Typography variant="body2" color="success" className="mt-3">
-            ✅ Mã vạch đã quét: {[...detectedBarcodes].join(", ")}
-          </Typography>
-        )} */}
       </CardContent>
     </Card>
   );
