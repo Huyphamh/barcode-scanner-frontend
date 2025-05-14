@@ -15,8 +15,9 @@ const CameraCapture = ({ setBarcodes }) => {
   const canvasRef = useRef(null);
   const [scanning, setScanning] = useState(false);
   const [selectedCamera, setSelectedCamera] = useState("environment");
-  const codeReader = new BrowserMultiFormatReader();
-  let clearCanvasTimeout = null;
+  const codeReader = useRef(new BrowserMultiFormatReader()).current;
+  const clearCanvasTimeout = useRef(null);
+  const lastScannedCode = useRef("");
 
   useEffect(() => {
     return () => {
@@ -35,7 +36,7 @@ const CameraCapture = ({ setBarcodes }) => {
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.setAttribute("playsinline", ""); // iOS cần
+        videoRef.current.setAttribute("playsinline", "");
         videoRef.current.play();
       }
 
@@ -45,43 +46,13 @@ const CameraCapture = ({ setBarcodes }) => {
         (result, err) => {
           if (result) {
             const code = result.getText();
+
+            // Tránh quét lại liên tục cùng một mã
+            if (code === lastScannedCode.current) return;
+            lastScannedCode.current = code;
+
             const points = result.getResultPoints();
-
-            // Vẽ khung focus nếu có tọa độ
-            if (canvasRef.current && points.length >= 2) {
-              const canvas = canvasRef.current;
-              const ctx = canvas.getContext("2d");
-              const rect = videoRef.current.getBoundingClientRect();
-
-              canvas.width = rect.width;
-              canvas.height = rect.height;
-
-              const scaleX = canvas.width / videoRef.current.videoWidth;
-              const scaleY = canvas.height / videoRef.current.videoHeight;
-
-              const [p1, p2] = points;
-
-              const x = p1.getX() * scaleX;
-              const y = p1.getY() * scaleY;
-              const width = (p2.getX() - p1.getX()) * scaleX || 80;
-              const height = (p2.getY() - p1.getY()) * scaleY || 80;
-
-              // Xóa canvas và vẽ mới
-              ctx.clearRect(0, 0, canvas.width, canvas.height);
-              ctx.strokeStyle = "lime";
-              ctx.lineWidth = 4;
-              ctx.strokeRect(x, y, width, height);
-
-              // Hiện canvas (fade in)
-              canvas.style.opacity = "1";
-
-              // Xóa sau 500ms (fade out)
-              if (clearCanvasTimeout) clearTimeout(clearCanvasTimeout);
-              clearCanvasTimeout = setTimeout(() => {
-                canvas.style.opacity = "0";
-                ctx.clearRect(0, 0, canvas.width, canvas.height);
-              }, 500);
-            }
+            drawFocus(points);
 
             setBarcodes((prev) => {
               if (!prev.has(code)) {
@@ -94,9 +65,7 @@ const CameraCapture = ({ setBarcodes }) => {
               return prev;
             });
 
-            if (navigator.vibrate) {
-              navigator.vibrate(200);
-            }
+            if (navigator.vibrate) navigator.vibrate(200);
           }
         }
       );
@@ -106,19 +75,55 @@ const CameraCapture = ({ setBarcodes }) => {
     }
   };
 
+  const drawFocus = (points) => {
+    if (!canvasRef.current || !videoRef.current || points.length < 2) return;
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    const rect = videoRef.current.getBoundingClientRect();
+
+    canvas.width = rect.width;
+    canvas.height = rect.height;
+
+    const scaleX = canvas.width / videoRef.current.videoWidth;
+    const scaleY = canvas.height / videoRef.current.videoHeight;
+
+    const xPoints = points.map((p) => p.getX() * scaleX);
+    const yPoints = points.map((p) => p.getY() * scaleY);
+
+    const x = Math.min(...xPoints);
+    const y = Math.min(...yPoints);
+    const width = Math.max(...xPoints) - x || 80;
+    const height = Math.max(...yPoints) - y || 80;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = "lime";
+    ctx.lineWidth = 4;
+    ctx.strokeRect(x, y, width, height);
+
+    canvas.style.opacity = "1";
+
+    if (clearCanvasTimeout.current) clearTimeout(clearCanvasTimeout.current);
+    clearCanvasTimeout.current = setTimeout(() => {
+      canvas.style.opacity = "0";
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }, 500);
+  };
+
   const stopScanner = () => {
-    if (videoRef.current && videoRef.current.srcObject) {
+    if (videoRef.current?.srcObject) {
       videoRef.current.srcObject.getTracks().forEach((track) => track.stop());
     }
     codeReader.reset();
     setScanning(false);
+    lastScannedCode.current = "";
 
     if (canvasRef.current) {
       const ctx = canvasRef.current.getContext("2d");
       ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
       canvasRef.current.style.opacity = "0";
     }
-    if (clearCanvasTimeout) clearTimeout(clearCanvasTimeout);
+    if (clearCanvasTimeout.current) clearTimeout(clearCanvasTimeout.current);
   };
 
   return (
@@ -126,7 +131,6 @@ const CameraCapture = ({ setBarcodes }) => {
       <CardContent className="text-center">
         <Typography variant="h5">📸 Quét mã vạch bằng camera</Typography>
 
-        {/* Vùng hiển thị camera + canvas */}
         <div
           style={{
             width: "100%",
@@ -153,14 +157,12 @@ const CameraCapture = ({ setBarcodes }) => {
           />
         </div>
 
-        {/* Chọn Camera */}
         <Select
           value={selectedCamera}
           onChange={(e) => setSelectedCamera(e.target.value)}
           style={{ marginTop: "10px" }}
         >
           <MenuItem value="environment">📷 Camera Sau</MenuItem>
-          {/* <MenuItem value="user">🤳 Camera Trước</MenuItem> */}
         </Select>
 
         {scanning ? (
@@ -173,7 +175,6 @@ const CameraCapture = ({ setBarcodes }) => {
           </Typography>
         )}
 
-        {/* Nút điều khiển */}
         <Button
           variant="contained"
           color="primary"
