@@ -1,6 +1,10 @@
 import React, { useEffect, useRef, useState } from "react";
-import * as tf from "@tensorflow/tfjs";
-import { BrowserMultiFormatReader } from "@zxing/library";
+import {
+  BrowserMultiFormatReader,
+  RGBLuminanceSource,
+  BinaryBitmap,
+  HybridBinarizer,
+} from "@zxing/library";
 import { toast } from "react-toastify";
 import {
   Button,
@@ -10,9 +14,8 @@ import {
   Select,
   MenuItem,
 } from "@mui/material";
-
-const MODEL_URL =
-  "https://tfhub.dev/captain-pool/esrgan-tf2/1/default/1"; // ESRGAN TF Hub model
+import Upscaler from "upscaler";
+import model from "@upscalerjs/esrgan-medium";
 
 const CameraCapture = ({ barcodes, setBarcodes }) => {
   const videoRef = useRef(null);
@@ -22,27 +25,18 @@ const CameraCapture = ({ barcodes, setBarcodes }) => {
   const codeReader = useRef(new BrowserMultiFormatReader()).current;
   const clearCanvasTimeout = useRef(null);
   const lastScannedCodes = useRef(new Set());
-  const modelRef = useRef(null);
+  const upscalerRef = useRef(null);
 
   useEffect(() => {
-    lastScannedCodes.current = new Set([...barcodes]);
-  }, [barcodes]);
-
-  useEffect(() => {
-    const loadModel = async () => {
-      try {
-        modelRef.current = await tf.loadGraphModel(MODEL_URL, { fromTFHub: true });
-        console.log("✅ ESRGAN model loaded");
-      } catch (err) {
-        console.error("❌ Load ESRGAN model failed:", err);
-      }
-    };
-    loadModel();
-
+    upscalerRef.current = new Upscaler({ model });
     return () => {
       stopScanner();
     };
   }, []);
+
+  useEffect(() => {
+    lastScannedCodes.current = new Set([...barcodes]);
+  }, [barcodes]);
 
   const startScanner = async () => {
     if (scanning) return;
@@ -56,77 +50,75 @@ const CameraCapture = ({ barcodes, setBarcodes }) => {
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         videoRef.current.setAttribute("playsinline", "");
-        await videoRef.current.play();
+        videoRef.current.play();
       }
 
-      processFrame();
+      scanFrameLoop();
     } catch (error) {
       console.error("🚨 Lỗi khi mở camera:", error);
       setScanning(false);
     }
   };
 
-  const processFrame = async () => {
-    if (!scanning || !videoRef.current || !canvasRef.current) return;
+  const scanFrameLoop = async () => {
+    if (!videoRef.current || !scanning) return;
 
     const video = videoRef.current;
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
-    const model = modelRef.current;
+    const width = video.videoWidth;
+    const height = video.videoHeight;
 
-    if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-    }
-
-    if (!model) {
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      requestAnimationFrame(processFrame);
+    if (width === 0 || height === 0) {
+      requestAnimationFrame(scanFrameLoop);
       return;
     }
 
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(video, 0, 0, width, height);
+
+    const imageData = ctx.getImageData(0, 0, width, height);
 
     try {
-      let imgTensor = tf.browser.fromPixels(canvas);
-      imgTensor = imgTensor.expandDims(0).toFloat().div(tf.scalar(255));
+      const upscaled = await upscalerRef.current.upscale(imageData);
 
-      let outputTensor = await model.executeAsync(imgTensor);
-      if (Array.isArray(outputTensor)) outputTensor = outputTensor[0];
+      const upCanvas = document.createElement("canvas");
+      upCanvas.width = upscaled.width;
+      upCanvas.height = upscaled.height;
+      const upCtx = upCanvas.getContext("2d");
+      upCtx.putImageData(upscaled, 0, 0);
 
-      const srTensor = outputTensor.squeeze().mul(tf.scalar(255)).clipByValue(0, 255).toInt();
+      const upscaledImageData = upCtx.getImageData(
+        0,
+        0,
+        upscaled.width,
+        upscaled.height
+      );
+      const luminanceSource = new RGBLuminanceSource(
+        upscaledImageData.data,
+        upscaled.width,
+        upscaled.height
+      );
+      const binaryBitmap = new BinaryBitmap(
+        new HybridBinarizer(luminanceSource)
+      );
 
-      await tf.browser.toPixels(srTensor, canvas);
-
-      imgTensor.dispose();
-      outputTensor.dispose();
-      srTensor.dispose();
-    } catch (err) {
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      console.warn("⚠️ Lỗi khi chạy ESRGAN:", err);
-    }
-
-    try {
-      const result = await codeReader.decodeFromCanvas(canvas);
+      const result = codeReader.decode(binaryBitmap);
       if (result) {
         const code = result.getText();
         if (!lastScannedCodes.current.has(code)) {
           lastScannedCodes.current.add(code);
+          toast.success(`✅ Đã quét: ${code}`, { autoClose: 2000 });
           setBarcodes((prev) => new Set([...prev, code]));
-
-          toast.success(`✅ Đã quét: ${code}`, {
-            position: "top-right",
-            autoClose: 2000,
-          });
-
           if (navigator.vibrate) navigator.vibrate(200);
         }
       }
-    } catch {
-      // Không tìm thấy mã vạch
+    } catch (err) {
+      // Không log lỗi decode để tránh spam
     }
 
-    requestAnimationFrame(processFrame);
+    requestAnimationFrame(scanFrameLoop);
   };
 
   const stopScanner = () => {
@@ -136,19 +128,12 @@ const CameraCapture = ({ barcodes, setBarcodes }) => {
     codeReader.reset();
     setScanning(false);
     lastScannedCodes.current.clear();
-
-    if (canvasRef.current) {
-      const ctx = canvasRef.current.getContext("2d");
-      ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-      canvasRef.current.style.opacity = "0";
-    }
-    if (clearCanvasTimeout.current) clearTimeout(clearCanvasTimeout.current);
   };
 
   return (
     <Card className="shadow-lg">
       <CardContent className="text-center">
-        <Typography variant="h5">📸 Quét mã vạch bằng camera + AI ESRGAN</Typography>
+        <Typography variant="h5">📸 Quét mã vạch bằng camera</Typography>
 
         <div
           style={{
@@ -160,14 +145,7 @@ const CameraCapture = ({ barcodes, setBarcodes }) => {
             position: "relative",
           }}
         >
-          <video
-            ref={videoRef}
-            style={{ display: "none" }}
-            playsInline
-            muted
-            width="100%"
-            height="100%"
-          />
+          <video ref={videoRef} style={{ width: "100%", height: "100%" }} />
           <canvas
             ref={canvasRef}
             style={{
@@ -178,7 +156,7 @@ const CameraCapture = ({ barcodes, setBarcodes }) => {
               height: "100%",
               pointerEvents: "none",
               transition: "opacity 0.3s ease-in-out",
-              opacity: 1,
+              opacity: 0,
             }}
           />
         </div>
@@ -193,7 +171,7 @@ const CameraCapture = ({ barcodes, setBarcodes }) => {
 
         {scanning ? (
           <Typography variant="body1" color="primary" className="mt-2">
-            🔍 Đang quét với AI nâng cấp ảnh...
+            🔍 Đang quét mã vạch...
           </Typography>
         ) : (
           <Typography variant="body1" color="textSecondary" className="mt-2">
