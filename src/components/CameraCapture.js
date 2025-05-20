@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import * as tf from "@tensorflow/tfjs";
 import { BrowserMultiFormatReader } from "@zxing/library";
 import { toast } from "react-toastify";
 import {
@@ -10,6 +11,9 @@ import {
   MenuItem,
 } from "@mui/material";
 
+const MODEL_URL =
+  "https://tfhub.dev/captain-pool/esrgan-tf2/1/default/1"; // ESRGAN TF Hub model
+
 const CameraCapture = ({ barcodes, setBarcodes }) => {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -17,16 +21,28 @@ const CameraCapture = ({ barcodes, setBarcodes }) => {
   const [selectedCamera, setSelectedCamera] = useState("environment");
   const codeReader = useRef(new BrowserMultiFormatReader()).current;
   const clearCanvasTimeout = useRef(null);
-  const lastScannedCodes = useRef(new Set()); // Thay vì lưu chỉ một mã vạch đã quét
+  const lastScannedCodes = useRef(new Set());
+  const modelRef = useRef(null);
 
   useEffect(() => {
+    lastScannedCodes.current = new Set([...barcodes]);
+  }, [barcodes]);
+
+  useEffect(() => {
+    const loadModel = async () => {
+      try {
+        modelRef.current = await tf.loadGraphModel(MODEL_URL, { fromTFHub: true });
+        console.log("✅ ESRGAN model loaded");
+      } catch (err) {
+        console.error("❌ Load ESRGAN model failed:", err);
+      }
+    };
+    loadModel();
+
     return () => {
       stopScanner();
     };
   }, []);
-  useEffect(() => {
-    lastScannedCodes.current = new Set([...barcodes]);
-  }, [barcodes]);
 
   const startScanner = async () => {
     if (scanning) return;
@@ -40,91 +56,77 @@ const CameraCapture = ({ barcodes, setBarcodes }) => {
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         videoRef.current.setAttribute("playsinline", "");
-        videoRef.current.play();
+        await videoRef.current.play();
       }
 
-      codeReader.decodeFromVideoDevice(
-        undefined,
-        videoRef.current,
-        (result, err) => {
-          if (result) {
-            const code = result.getText();
-
-            // Tránh quét lại liên tục cùng một mã
-            if (lastScannedCodes.current.has(code)) return;
-
-            lastScannedCodes.current.add(code);
-
-            const points = result.getResultPoints();
-            drawFocus(points);
-
-            setBarcodes((prev) => {
-              if (!prev.has(code)) {
-                toast.success(`✅ Đã quét: ${code}`, {
-                  position: "top-right",
-                  autoClose: 2000,
-                });
-                return new Set([...prev, code]);
-              }
-              return prev;
-            });
-
-            if (navigator.vibrate) navigator.vibrate(200);
-          }
-        }
-      );
+      processFrame();
     } catch (error) {
       console.error("🚨 Lỗi khi mở camera:", error);
       setScanning(false);
     }
   };
 
-  const drawFocus = (points) => {
-    if (!canvasRef.current || !videoRef.current || points.length < 2) return;
+  const processFrame = async () => {
+    if (!scanning || !videoRef.current || !canvasRef.current) return;
 
+    const video = videoRef.current;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
-    const video = videoRef.current;
+    const model = modelRef.current;
 
-    const videoWidth = video.videoWidth;
-    const videoHeight = video.videoHeight;
+    if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+    }
 
-    // Lấy kích thước hiển thị thực tế của video
-    const rect = video.getBoundingClientRect();
-    canvas.width = rect.width;
-    canvas.height = rect.height;
+    if (!model) {
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      requestAnimationFrame(processFrame);
+      return;
+    }
 
-    // Tính tỉ lệ giữa kích thước canvas hiển thị và video gốc
-    const scaleX = rect.width / videoWidth;
-    const scaleY = rect.height / videoHeight;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-    // Scale đều theo tỉ lệ phù hợp nhất (thường lấy min)
-    const scale = Math.min(scaleX, scaleY);
+    try {
+      let imgTensor = tf.browser.fromPixels(canvas);
+      imgTensor = imgTensor.expandDims(0).toFloat().div(tf.scalar(255));
 
-    // Tính offset nếu có padding 2 chiều (do video bị "fit" vào khung canvas theo tỉ lệ khác)
-    const offsetX = (rect.width - videoWidth * scale) / 2;
-    const offsetY = (rect.height - videoHeight * scale) / 2;
+      let outputTensor = await model.executeAsync(imgTensor);
+      if (Array.isArray(outputTensor)) outputTensor = outputTensor[0];
 
-    const xPoints = points.map((p) => p.getX() * scale + offsetX);
-    const yPoints = points.map((p) => p.getY() * scale + offsetY);
+      const srTensor = outputTensor.squeeze().mul(tf.scalar(255)).clipByValue(0, 255).toInt();
 
-    const x = Math.min(...xPoints);
-    const y = Math.min(...yPoints);
-    const width = Math.max(...xPoints) - x || 80;
-    const height = Math.max(...yPoints) - y || 80;
+      await tf.browser.toPixels(srTensor, canvas);
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.strokeStyle = "lime";
-    ctx.lineWidth = 4;
-    ctx.strokeRect(x, y, width, height);
+      imgTensor.dispose();
+      outputTensor.dispose();
+      srTensor.dispose();
+    } catch (err) {
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      console.warn("⚠️ Lỗi khi chạy ESRGAN:", err);
+    }
 
-    canvas.style.opacity = "1";
+    try {
+      const result = await codeReader.decodeFromCanvas(canvas);
+      if (result) {
+        const code = result.getText();
+        if (!lastScannedCodes.current.has(code)) {
+          lastScannedCodes.current.add(code);
+          setBarcodes((prev) => new Set([...prev, code]));
 
-    if (clearCanvasTimeout.current) clearTimeout(clearCanvasTimeout.current);
-    clearCanvasTimeout.current = setTimeout(() => {
-      canvas.style.opacity = "0";
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-    }, 500);
+          toast.success(`✅ Đã quét: ${code}`, {
+            position: "top-right",
+            autoClose: 2000,
+          });
+
+          if (navigator.vibrate) navigator.vibrate(200);
+        }
+      }
+    } catch {
+      // Không tìm thấy mã vạch
+    }
+
+    requestAnimationFrame(processFrame);
   };
 
   const stopScanner = () => {
@@ -133,7 +135,7 @@ const CameraCapture = ({ barcodes, setBarcodes }) => {
     }
     codeReader.reset();
     setScanning(false);
-    lastScannedCodes.current.clear(); // Xóa bộ nhớ lưu mã vạch đã quét
+    lastScannedCodes.current.clear();
 
     if (canvasRef.current) {
       const ctx = canvasRef.current.getContext("2d");
@@ -146,7 +148,7 @@ const CameraCapture = ({ barcodes, setBarcodes }) => {
   return (
     <Card className="shadow-lg">
       <CardContent className="text-center">
-        <Typography variant="h5">📸 Quét mã vạch bằng camera</Typography>
+        <Typography variant="h5">📸 Quét mã vạch bằng camera + AI ESRGAN</Typography>
 
         <div
           style={{
@@ -158,7 +160,14 @@ const CameraCapture = ({ barcodes, setBarcodes }) => {
             position: "relative",
           }}
         >
-          <video ref={videoRef} style={{ width: "100%", height: "100%" }} />
+          <video
+            ref={videoRef}
+            style={{ display: "none" }}
+            playsInline
+            muted
+            width="100%"
+            height="100%"
+          />
           <canvas
             ref={canvasRef}
             style={{
@@ -169,7 +178,7 @@ const CameraCapture = ({ barcodes, setBarcodes }) => {
               height: "100%",
               pointerEvents: "none",
               transition: "opacity 0.3s ease-in-out",
-              opacity: 0,
+              opacity: 1,
             }}
           />
         </div>
@@ -184,7 +193,7 @@ const CameraCapture = ({ barcodes, setBarcodes }) => {
 
         {scanning ? (
           <Typography variant="body1" color="primary" className="mt-2">
-            🔍 Đang quét mã vạch...
+            🔍 Đang quét với AI nâng cấp ảnh...
           </Typography>
         ) : (
           <Typography variant="body1" color="textSecondary" className="mt-2">
