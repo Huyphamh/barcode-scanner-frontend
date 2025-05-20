@@ -1,10 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import {
-  BrowserMultiFormatReader,
-  RGBLuminanceSource,
-  BinaryBitmap,
-  HybridBinarizer,
-} from "@zxing/library";
+import { BrowserMultiFormatReader } from "@zxing/library";
 import { toast } from "react-toastify";
 import {
   Button,
@@ -14,8 +9,6 @@ import {
   Select,
   MenuItem,
 } from "@mui/material";
-import Upscaler from "upscaler";
-import { x2 } from "@upscalerjs/esrgan-medium";
 
 const CameraCapture = ({ barcodes, setBarcodes }) => {
   const videoRef = useRef(null);
@@ -24,16 +17,13 @@ const CameraCapture = ({ barcodes, setBarcodes }) => {
   const [selectedCamera, setSelectedCamera] = useState("environment");
   const codeReader = useRef(new BrowserMultiFormatReader()).current;
   const clearCanvasTimeout = useRef(null);
-  const lastScannedCodes = useRef(new Set());
-  const upscalerRef = useRef(null);
+  const lastScannedCodes = useRef(new Set()); // Thay vì lưu chỉ một mã vạch đã quét
 
   useEffect(() => {
-    upscalerRef.current = new Upscaler({ model: x2 });
     return () => {
       stopScanner();
     };
   }, []);
-
   useEffect(() => {
     lastScannedCodes.current = new Set([...barcodes]);
   }, [barcodes]);
@@ -53,72 +43,88 @@ const CameraCapture = ({ barcodes, setBarcodes }) => {
         videoRef.current.play();
       }
 
-      scanFrameLoop();
+      codeReader.decodeFromVideoDevice(
+        undefined,
+        videoRef.current,
+        (result, err) => {
+          if (result) {
+            const code = result.getText();
+
+            // Tránh quét lại liên tục cùng một mã
+            if (lastScannedCodes.current.has(code)) return;
+
+            lastScannedCodes.current.add(code);
+
+            const points = result.getResultPoints();
+            drawFocus(points);
+
+            setBarcodes((prev) => {
+              if (!prev.has(code)) {
+                toast.success(`✅ Đã quét: ${code}`, {
+                  position: "top-right",
+                  autoClose: 2000,
+                });
+                return new Set([...prev, code]);
+              }
+              return prev;
+            });
+
+            if (navigator.vibrate) navigator.vibrate(200);
+          }
+        }
+      );
     } catch (error) {
       console.error("🚨 Lỗi khi mở camera:", error);
       setScanning(false);
     }
   };
 
-  const scanFrameLoop = async () => {
-    if (!videoRef.current || !scanning) return;
+  const drawFocus = (points) => {
+    if (!canvasRef.current || !videoRef.current || points.length < 2) return;
 
-    const video = videoRef.current;
-    const width = video.videoWidth;
-    const height = video.videoHeight;
-
-    if (width === 0 || height === 0) {
-      requestAnimationFrame(scanFrameLoop);
-      return;
-    }
-
-    const canvas = document.createElement("canvas");
-    canvas.width = width;
-    canvas.height = height;
+    const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
-    ctx.drawImage(video, 0, 0, width, height);
+    const video = videoRef.current;
 
-    const imageData = ctx.getImageData(0, 0, width, height);
+    const videoWidth = video.videoWidth;
+    const videoHeight = video.videoHeight;
 
-    try {
-      const upscaled = await upscalerRef.current.upscale(imageData);
+    // Lấy kích thước hiển thị thực tế của video
+    const rect = video.getBoundingClientRect();
+    canvas.width = rect.width;
+    canvas.height = rect.height;
 
-      const upCanvas = document.createElement("canvas");
-      upCanvas.width = upscaled.width;
-      upCanvas.height = upscaled.height;
-      const upCtx = upCanvas.getContext("2d");
-      upCtx.putImageData(upscaled, 0, 0);
+    // Tính tỉ lệ giữa kích thước canvas hiển thị và video gốc
+    const scaleX = rect.width / videoWidth;
+    const scaleY = rect.height / videoHeight;
 
-      const upscaledImageData = upCtx.getImageData(
-        0,
-        0,
-        upscaled.width,
-        upscaled.height
-      );
-      const luminanceSource = new RGBLuminanceSource(
-        upscaledImageData.data,
-        upscaled.width,
-        upscaled.height
-      );
-      const binaryBitmap = new BinaryBitmap(
-        new HybridBinarizer(luminanceSource)
-      );
+    // Scale đều theo tỉ lệ phù hợp nhất (thường lấy min)
+    const scale = Math.min(scaleX, scaleY);
 
-      const result = codeReader.decode(binaryBitmap);
-      if (result) {
-        const code = result.getText();
-        if (!lastScannedCodes.current.has(code)) {
-          lastScannedCodes.current.add(code);
-          toast.success(`✅ Đã quét: ${code}`, { autoClose: 2000 });
-          setBarcodes((prev) => new Set([...prev, code]));
-          if (navigator.vibrate) navigator.vibrate(200);
-        }
-      }
-    } catch (err) {
-      // Không log lỗi decode để tránh spam
-    }
+    // Tính offset nếu có padding 2 chiều (do video bị "fit" vào khung canvas theo tỉ lệ khác)
+    const offsetX = (rect.width - videoWidth * scale) / 2;
+    const offsetY = (rect.height - videoHeight * scale) / 2;
 
-    requestAnimationFrame(scanFrameLoop);
+    const xPoints = points.map((p) => p.getX() * scale + offsetX);
+    const yPoints = points.map((p) => p.getY() * scale + offsetY);
+
+    const x = Math.min(...xPoints);
+    const y = Math.min(...yPoints);
+    const width = Math.max(...xPoints) - x || 80;
+    const height = Math.max(...yPoints) - y || 80;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.strokeStyle = "lime";
+    ctx.lineWidth = 4;
+    ctx.strokeRect(x, y, width, height);
+
+    canvas.style.opacity = "1";
+
+    if (clearCanvasTimeout.current) clearTimeout(clearCanvasTimeout.current);
+    clearCanvasTimeout.current = setTimeout(() => {
+      canvas.style.opacity = "0";
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }, 500);
   };
 
   const stopScanner = () => {
@@ -127,7 +133,14 @@ const CameraCapture = ({ barcodes, setBarcodes }) => {
     }
     codeReader.reset();
     setScanning(false);
-    lastScannedCodes.current.clear();
+    lastScannedCodes.current.clear(); // Xóa bộ nhớ lưu mã vạch đã quét
+
+    if (canvasRef.current) {
+      const ctx = canvasRef.current.getContext("2d");
+      ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+      canvasRef.current.style.opacity = "0";
+    }
+    if (clearCanvasTimeout.current) clearTimeout(clearCanvasTimeout.current);
   };
 
   return (
