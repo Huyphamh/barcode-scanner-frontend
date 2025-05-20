@@ -15,7 +15,7 @@ import {
   MenuItem,
 } from "@mui/material";
 import Upscaler from "upscaler";
-import model from "@upscalerjs/esrgan-medium";
+import { model } from "@upscalerjs/esrgan-medium";
 
 const CameraCapture = ({ barcodes, setBarcodes }) => {
   const videoRef = useRef(null);
