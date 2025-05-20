@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
-import { BrowserMultiFormatReader } from "@zxing/library";
+import * as tf from "@tensorflow/tfjs";
 import { toast } from "react-toastify";
+import { BrowserMultiFormatReader } from "@zxing/library";
 import {
   Button,
   Card,
@@ -10,154 +11,149 @@ import {
   MenuItem,
 } from "@mui/material";
 
+const MODEL_URL = "/models/yolov5n/model.json"; // đường dẫn tới mô hình YOLO
+
 const CameraCapture = ({ barcodes, setBarcodes }) => {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+  const modelRef = useRef(null);
+  const codeReader = useRef(new BrowserMultiFormatReader()).current;
   const [scanning, setScanning] = useState(false);
   const [selectedCamera, setSelectedCamera] = useState("environment");
-  const codeReader = useRef(new BrowserMultiFormatReader()).current;
-  const clearCanvasTimeout = useRef(null);
-  const lastScannedCodes = useRef(new Set()); // Thay vì lưu chỉ một mã vạch đã quét
+  const lastScannedCodes = useRef(new Set());
+  const animationFrameRef = useRef(null);
 
   useEffect(() => {
     return () => {
       stopScanner();
     };
   }, []);
+
   useEffect(() => {
     lastScannedCodes.current = new Set([...barcodes]);
   }, [barcodes]);
 
+  const loadModel = async () => {
+    if (!modelRef.current) {
+      modelRef.current = await tf.loadGraphModel(MODEL_URL);
+      console.log("✅ YOLOv5n model loaded.");
+    }
+  };
+
   const startScanner = async () => {
     if (scanning) return;
     setScanning(true);
+    await loadModel();
 
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: selectedCamera },
-      });
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: selectedCamera },
+    });
 
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.setAttribute("playsinline", "");
-        videoRef.current.play();
-      }
-
-      codeReader.decodeFromVideoDevice(
-        undefined,
-        videoRef.current,
-        (result, err) => {
-          if (result) {
-            const code = result.getText();
-
-            // Tránh quét lại liên tục cùng một mã
-            if (lastScannedCodes.current.has(code)) return;
-
-            lastScannedCodes.current.add(code);
-
-            const points = result.getResultPoints();
-            drawFocus(points);
-
-            setBarcodes((prev) => {
-              if (!prev.has(code)) {
-                toast.success(`✅ Đã quét: ${code}`, {
-                  position: "top-right",
-                  autoClose: 2000,
-                });
-                return new Set([...prev, code]);
-              }
-              return prev;
-            });
-
-            if (navigator.vibrate) navigator.vibrate(200);
-          }
-        }
-      );
-    } catch (error) {
-      console.error("🚨 Lỗi khi mở camera:", error);
-      setScanning(false);
+    if (videoRef.current) {
+      videoRef.current.srcObject = stream;
+      videoRef.current.setAttribute("playsinline", "");
+      await videoRef.current.play();
+      detectFrame();
     }
   };
 
-  const drawFocus = (points) => {
-    if (!canvasRef.current || !videoRef.current || points.length < 2) return;
+  const detectFrame = async () => {
+    if (!videoRef.current || !canvasRef.current || !modelRef.current) return;
 
+    const video = videoRef.current;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
-    const video = videoRef.current;
 
-    const videoWidth = video.videoWidth;
-    const videoHeight = video.videoHeight;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
 
-    // Lấy kích thước hiển thị thực tế của video
-    const rect = video.getBoundingClientRect();
-    canvas.width = rect.width;
-    canvas.height = rect.height;
+    const tensor = tf.browser.fromPixels(video).expandDims(0).div(255);
+    const preds = await modelRef.current.executeAsync(tensor);
+    tf.dispose(tensor);
 
-    // Tính tỉ lệ giữa kích thước canvas hiển thị và video gốc
-    const scaleX = rect.width / videoWidth;
-    const scaleY = rect.height / videoHeight;
+    // giả định output có bbox như [x, y, w, h, conf, class]
+    const boxes = preds[0].arraySync()[0]; // Lấy danh sách bbox
+    const scores = preds[1].arraySync()[0]; // Confidence (nếu có)
 
-    // Scale đều theo tỉ lệ phù hợp nhất (thường lấy min)
-    const scale = Math.min(scaleX, scaleY);
+    for (let i = 0; i < boxes.length; i++) {
+      const [x, y, w, h] = boxes[i];
 
-    // Tính offset nếu có padding 2 chiều (do video bị "fit" vào khung canvas theo tỉ lệ khác)
-    const offsetX = (rect.width - videoWidth * scale) / 2;
-    const offsetY = (rect.height - videoHeight * scale) / 2;
+      // lọc confidence
+      if (scores[i] < 0.5) continue;
 
-    const xPoints = points.map((p) => p.getX() * scale + offsetX);
-    const yPoints = points.map((p) => p.getY() * scale + offsetY);
+      // vẽ khung focus
+      ctx.strokeStyle = "lime";
+      ctx.lineWidth = 3;
+      ctx.strokeRect(x, y, w, h);
 
-    const x = Math.min(...xPoints);
-    const y = Math.min(...yPoints);
-    const width = Math.max(...xPoints) - x || 80;
-    const height = Math.max(...yPoints) - y || 80;
+      // cắt ảnh từ vùng bbox
+      const cropped = await cropVideoFrame(video, x, y, w, h);
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.strokeStyle = "lime";
-    ctx.lineWidth = 4;
-    ctx.strokeRect(x, y, width, height);
+      try {
+        const result = await codeReader.decodeFromImageElement(cropped);
+        const code = result.getText();
 
-    canvas.style.opacity = "1";
+        if (!lastScannedCodes.current.has(code)) {
+          lastScannedCodes.current.add(code);
+          setBarcodes((prev) => new Set([...prev, code]));
 
-    if (clearCanvasTimeout.current) clearTimeout(clearCanvasTimeout.current);
-    clearCanvasTimeout.current = setTimeout(() => {
-      canvas.style.opacity = "0";
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-    }, 500);
+          toast.success(`✅ Quét thành công: ${code}`, {
+            position: "top-right",
+            autoClose: 2000,
+          });
+
+          if (navigator.vibrate) navigator.vibrate(200);
+        }
+      } catch (e) {
+        // Không tìm thấy mã, bỏ qua
+      }
+    }
+
+    preds.forEach((p) => tf.dispose(p));
+
+    animationFrameRef.current = requestAnimationFrame(detectFrame);
+  };
+
+  const cropVideoFrame = (video, x, y, w, h) => {
+    const tempCanvas = document.createElement("canvas");
+    const ctx = tempCanvas.getContext("2d");
+
+    tempCanvas.width = w;
+    tempCanvas.height = h;
+
+    ctx.drawImage(video, x, y, w, h, 0, 0, w, h);
+
+    const img = new Image();
+    img.src = tempCanvas.toDataURL("image/png");
+
+    return new Promise((resolve) => {
+      img.onload = () => resolve(img);
+    });
   };
 
   const stopScanner = () => {
+    if (animationFrameRef.current)
+      cancelAnimationFrame(animationFrameRef.current);
+
     if (videoRef.current?.srcObject) {
       videoRef.current.srcObject.getTracks().forEach((track) => track.stop());
     }
-    codeReader.reset();
+
     setScanning(false);
-    lastScannedCodes.current.clear(); // Xóa bộ nhớ lưu mã vạch đã quét
+    lastScannedCodes.current.clear();
 
     if (canvasRef.current) {
       const ctx = canvasRef.current.getContext("2d");
       ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-      canvasRef.current.style.opacity = "0";
     }
-    if (clearCanvasTimeout.current) clearTimeout(clearCanvasTimeout.current);
   };
 
   return (
-    <Card className="shadow-lg">
+    <Card>
       <CardContent className="text-center">
         <Typography variant="h5">📸 Quét mã vạch bằng camera</Typography>
 
-        <div
-          style={{
-            width: "100%",
-            height: "300px",
-            border: "2px solid #007bff",
-            borderRadius: "8px",
-            overflow: "hidden",
-            position: "relative",
-          }}
-        >
+        <div style={{ width: "100%", height: "300px", position: "relative" }}>
           <video ref={videoRef} style={{ width: "100%", height: "100%" }} />
           <canvas
             ref={canvasRef}
@@ -168,29 +164,17 @@ const CameraCapture = ({ barcodes, setBarcodes }) => {
               width: "100%",
               height: "100%",
               pointerEvents: "none",
-              transition: "opacity 0.3s ease-in-out",
-              opacity: 0,
             }}
           />
         </div>
 
-        <Select
+        {/* <Select
           value={selectedCamera}
           onChange={(e) => setSelectedCamera(e.target.value)}
           style={{ marginTop: "10px" }}
         >
           <MenuItem value="environment">📷 Camera Sau</MenuItem>
-        </Select>
-
-        {scanning ? (
-          <Typography variant="body1" color="primary" className="mt-2">
-            🔍 Đang quét mã vạch...
-          </Typography>
-        ) : (
-          <Typography variant="body1" color="textSecondary" className="mt-2">
-            ⏹️ Máy quét đang dừng
-          </Typography>
-        )}
+        </Select> */}
 
         <Button
           variant="contained"
