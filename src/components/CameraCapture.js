@@ -15,7 +15,7 @@ import {
   MenuItem,
 } from "@mui/material";
 import Upscaler from "upscaler";
-import { model } from "@upscalerjs/esrgan-medium";
+import ESRGAN from "@upscalerjs/esrgan-medium";
 
 const CameraCapture = ({ barcodes, setBarcodes }) => {
   const videoRef = useRef(null);
@@ -28,7 +28,7 @@ const CameraCapture = ({ barcodes, setBarcodes }) => {
   const upscalerRef = useRef(null);
 
   useEffect(() => {
-    upscalerRef.current = new Upscaler({ model });
+    upscalerRef.current = new Upscaler({ model: new ESRGAN() });
     return () => {
       stopScanner();
     };
