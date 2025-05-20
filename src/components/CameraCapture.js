@@ -10,7 +10,7 @@ import {
   MenuItem,
 } from "@mui/material";
 
-const CameraCapture = ({ setBarcodes }) => {
+const CameraCapture = ({ barcodes, setBarcodes }) => {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const [scanning, setScanning] = useState(false);
@@ -24,6 +24,9 @@ const CameraCapture = ({ setBarcodes }) => {
       stopScanner();
     };
   }, []);
+  useEffect(() => {
+    lastScannedCodes.current = new Set([...barcodes]);
+  }, [barcodes]);
 
   const startScanner = async () => {
     if (scanning) return;

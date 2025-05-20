@@ -14,17 +14,12 @@ function App() {
       className="p-5 text-center "
       style={{ backgroundColor: "transparent" }}
     >
-      <Typography
-        variant="h3"
-        color="black"
-        className="mb-5"
-        
-      >
+      <Typography variant="h3" color="black" className="mb-5">
         📷 Quét Mã Vạch
       </Typography>
       <Box className="space-y-5">
         <BarcodeScanner setBarcodes={setBarcodes} />
-        <CameraCapture setBarcodes={setBarcodes} />
+        <CameraCapture setBarcodes={setBarcodes} barcodes={barcodes} />
         <BarcodeList barcodes={barcodes} setBarcodes={setBarcodes} />
         <ToastContainer />
       </Box>
