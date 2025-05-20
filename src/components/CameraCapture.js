@@ -81,34 +81,46 @@ const CameraCapture = ({ setBarcodes }) => {
 
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d");
-    const rect = videoRef.current.getBoundingClientRect();
+    const video = videoRef.current;
 
+    const videoWidth = video.videoWidth;
+    const videoHeight = video.videoHeight;
+
+    // Lấy kích thước hiển thị thực tế của video
+    const rect = video.getBoundingClientRect();
     canvas.width = rect.width;
     canvas.height = rect.height;
 
-    const scaleX = canvas.width / videoRef.current.videoWidth;
-    const scaleY = canvas.height / videoRef.current.videoHeight;
+    // Tính tỉ lệ giữa kích thước canvas hiển thị và video gốc
+    const scaleX = rect.width / videoWidth;
+    const scaleY = rect.height / videoHeight;
 
-    // Lấy tất cả các điểm của các mã vạch đã quét
-    const xPoints = points.map((p) => p.getX() * scaleX);
-    const yPoints = points.map((p) => p.getY() * scaleY);
+    // Scale đều theo tỉ lệ phù hợp nhất (thường lấy min)
+    const scale = Math.min(scaleX, scaleY);
+
+    // Tính offset nếu có padding 2 chiều (do video bị "fit" vào khung canvas theo tỉ lệ khác)
+    const offsetX = (rect.width - videoWidth * scale) / 2;
+    const offsetY = (rect.height - videoHeight * scale) / 2;
+
+    const xPoints = points.map((p) => p.getX() * scale + offsetX);
+    const yPoints = points.map((p) => p.getY() * scale + offsetY);
 
     const x = Math.min(...xPoints);
     const y = Math.min(...yPoints);
     const width = Math.max(...xPoints) - x || 80;
     const height = Math.max(...yPoints) - y || 80;
 
-    ctx.clearRect(0, 0, canvas.width, canvas.height); // Xóa canvas trước khi vẽ
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.strokeStyle = "lime";
     ctx.lineWidth = 4;
-    ctx.strokeRect(x, y, width, height); // Vẽ khung bao quanh mã vạch
+    ctx.strokeRect(x, y, width, height);
 
     canvas.style.opacity = "1";
 
     if (clearCanvasTimeout.current) clearTimeout(clearCanvasTimeout.current);
     clearCanvasTimeout.current = setTimeout(() => {
       canvas.style.opacity = "0";
-      ctx.clearRect(0, 0, canvas.width, canvas.height); // Xóa canvas sau khi tạm ẩn
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
     }, 500);
   };
 
